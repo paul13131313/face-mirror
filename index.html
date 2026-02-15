@@ -91,6 +91,9 @@
     background: rgba(255,255,255,0.15);
     border-color: rgba(255,255,255,0.6);
   }
+  #start-btn:disabled {
+    opacity: 0.3; cursor: default;
+  }
 
   /* Loading overlay */
   #loading {
@@ -134,7 +137,7 @@
 <div id="start-screen">
   <h2>FACE MIRROR</h2>
   <div class="desc">MEDIAPIPE FACE LANDMARKER × 468 POINTS</div>
-  <button id="start-btn">START CAMERA</button>
+  <button id="start-btn" disabled>LOADING LIBRARY...</button>
 </div>
 
 <div id="loading">
@@ -155,8 +158,22 @@
 <video id="video" autoplay playsinline style="display:none;"></video>
 <canvas id="canvas"></canvas>
 
+<!-- MediaPipe vision_bundle.js を同期読み込み -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+
 <script>
+// ---- vision 読み込み確認 ----
+if (typeof vision === 'undefined' || !vision.FaceLandmarker) {
+  document.getElementById('start-btn').textContent = 'ERROR: LIBRARY LOAD FAILED';
+  throw new Error('vision_bundle.js failed to load');
+}
+
+// vision が読み込まれたらボタンを有効化
+document.getElementById('start-btn').disabled = false;
+document.getElementById('start-btn').textContent = 'START CAMERA';
+
 // ---- Globals ----
+const { FaceLandmarker, FilesetResolver } = vision;
 let faceLandmarker = null;
 let video, canvas, ctx;
 let currentMode = 'wireframe';
@@ -168,37 +185,14 @@ let particles = [];
 let emotionEffects = [];
 let flashAlpha = 0;
 let canvasW, canvasH;
+let FL_CACHE = null;
 
 const MODES = ['WIREFRAME', 'MESH', 'PARTICLES', 'EMOTION'];
 
-// ---- Load vision_bundle.js dynamically ----
-function loadVisionBundle() {
-  return new Promise((resolve, reject) => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js';
-    script.crossOrigin = 'anonymous';
-    script.onload = () => {
-      // vision_bundle.js sets global `vision` object
-      const check = setInterval(() => {
-        if (typeof vision !== 'undefined' && vision.FaceLandmarker) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 50);
-      // safety timeout
-      setTimeout(() => { clearInterval(check); resolve(); }, 5000);
-    };
-    script.onerror = () => reject(new Error('vision_bundle.js の読み込みに失敗しました'));
-    document.head.appendChild(script);
-  });
-}
-
 // ---- MediaPipe Setup ----
 async function initMediaPipe() {
-  await loadVisionBundle();
-  const { FaceLandmarker, FilesetResolver } = vision;
   const filesetResolver = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/wasm"
   );
   faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
     baseOptions: {
@@ -211,15 +205,14 @@ async function initMediaPipe() {
   });
 
   // Cache landmark connection sets
-  const FL = vision.FaceLandmarker;
-  window._FL = {
-    FACE_OVAL: FL.FACE_LANDMARKS_FACE_OVAL,
-    LEFT_EYE: FL.FACE_LANDMARKS_LEFT_EYE,
-    RIGHT_EYE: FL.FACE_LANDMARKS_RIGHT_EYE,
-    LEFT_EYEBROW: FL.FACE_LANDMARKS_LEFT_EYEBROW,
-    RIGHT_EYEBROW: FL.FACE_LANDMARKS_RIGHT_EYEBROW,
-    LIPS: FL.FACE_LANDMARKS_LIPS,
-    TESSELATION: FL.FACE_LANDMARKS_TESSELATION,
+  FL_CACHE = {
+    FACE_OVAL: FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+    LEFT_EYE: FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+    RIGHT_EYE: FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+    LEFT_EYEBROW: FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
+    RIGHT_EYEBROW: FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
+    LIPS: FaceLandmarker.FACE_LANDMARKS_LIPS,
+    TESSELATION: FaceLandmarker.FACE_LANDMARKS_TESSELATION,
   };
 }
 
@@ -349,27 +342,19 @@ function drawWireframe(landmarks) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const FL = window._FL;
-
   // Face oval - white
-  const ovalConn = getConnectionIndices(FL.FACE_OVAL);
-  drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.6)', 1.5);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.FACE_OVAL), 'rgba(255,255,255,0.6)', 1.5);
 
   // Eyes - cyan
-  const leftEyeConn = getConnectionIndices(FL.LEFT_EYE);
-  const rightEyeConn = getConnectionIndices(FL.RIGHT_EYE);
-  drawConnectors(landmarks, leftEyeConn, '#00ffff', 1.5);
-  drawConnectors(landmarks, rightEyeConn, '#00ffff', 1.5);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.LEFT_EYE), '#00ffff', 1.5);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.RIGHT_EYE), '#00ffff', 1.5);
 
   // Eyebrows - cyan dim
-  const leftBrowConn = getConnectionIndices(FL.LEFT_EYEBROW);
-  const rightBrowConn = getConnectionIndices(FL.RIGHT_EYEBROW);
-  drawConnectors(landmarks, leftBrowConn, 'rgba(0,255,255,0.5)', 1);
-  drawConnectors(landmarks, rightBrowConn, 'rgba(0,255,255,0.5)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.LEFT_EYEBROW), 'rgba(0,255,255,0.5)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.RIGHT_EYEBROW), 'rgba(0,255,255,0.5)', 1);
 
   // Lips - magenta
-  const lipsConn = getConnectionIndices(FL.LIPS);
-  drawConnectors(landmarks, lipsConn, '#ff00ff', 1.5);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.LIPS), '#ff00ff', 1.5);
 
   // Draw landmark points
   for (const lm of landmarks) {
@@ -393,8 +378,7 @@ function drawMesh(landmarks) {
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const FL = window._FL;
-  const tessConn = getConnectionIndices(FL.TESSELATION);
+  const tessConn = getConnectionIndices(FL_CACHE.TESSELATION);
 
   for (const [start, end] of tessConn) {
     if (start >= landmarks.length || end >= landmarks.length) continue;
@@ -481,15 +465,10 @@ function drawEmotion(landmarks, blendshapes) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const FL = window._FL;
-  const ovalConn = getConnectionIndices(FL.FACE_OVAL);
-  drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.3)', 1);
-  const leftEyeConn = getConnectionIndices(FL.LEFT_EYE);
-  const rightEyeConn = getConnectionIndices(FL.RIGHT_EYE);
-  drawConnectors(landmarks, leftEyeConn, 'rgba(0,255,255,0.4)', 1);
-  drawConnectors(landmarks, rightEyeConn, 'rgba(0,255,255,0.4)', 1);
-  const lipsConn = getConnectionIndices(FL.LIPS);
-  drawConnectors(landmarks, lipsConn, 'rgba(255,0,255,0.4)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.FACE_OVAL), 'rgba(255,255,255,0.3)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.LEFT_EYE), 'rgba(0,255,255,0.4)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.RIGHT_EYE), 'rgba(0,255,255,0.4)', 1);
+  drawConnectors(landmarks, getConnectionIndices(FL_CACHE.LIPS), 'rgba(255,0,255,0.4)', 1);
 
   // Get scores
   const smileL = getBlendshapeScore(blendshapes, 'mouthSmileLeft');
