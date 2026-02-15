@@ -1,0 +1,667 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FACE MIRROR — MediaPipe Face Landmarker</title>
+
+<!-- OGP -->
+<meta property="og:title" content="FACE MIRROR">
+<meta property="og:description" content="MediaPipe Face Landmarkerで顔の468点ランドマークをリアルタイム検出し、4種類のエフェクトを切り替えるデジタルフェイス体験">
+<meta property="og:image" content="https://paul13131313.github.io/face-mirror/assets/ogp.png">
+<meta property="og:url" content="https://paul13131313.github.io/face-mirror/">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+
+<!-- Favicon -->
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #000; overflow: hidden; font-family: 'Courier New', monospace; }
+  canvas { display: block; }
+
+  #ui {
+    position: fixed; top: 0; left: 0; right: 0;
+    padding: 20px 24px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 10;
+  }
+  #ui > * { pointer-events: auto; }
+
+  .title-block { color: #fff; }
+  .title-block h1 {
+    font-size: 14px; font-weight: 700; letter-spacing: 4px;
+    color: rgba(255,255,255,0.9);
+  }
+  .title-block .sub {
+    font-size: 10px; letter-spacing: 2px;
+    color: rgba(255,255,255,0.4); margin-top: 4px;
+  }
+  #fps {
+    font-size: 10px; color: rgba(255,255,255,0.3);
+    margin-top: 8px;
+  }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .mode-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.6);
+    padding: 6px 14px; font-size: 10px; letter-spacing: 2px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer; transition: all 0.3s;
+    border-radius: 2px;
+  }
+  .mode-btn:hover {
+    background: rgba(255,255,255,0.15);
+    color: rgba(255,255,255,0.9);
+  }
+  .mode-btn.active {
+    background: rgba(255,255,255,0.2);
+    border-color: rgba(255,255,255,0.5);
+    color: #fff;
+  }
+
+  /* Start screen */
+  #start-screen {
+    position: fixed; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    background: #000; z-index: 100;
+  }
+  #start-screen h2 {
+    font-size: 24px; letter-spacing: 8px;
+    color: rgba(255,255,255,0.9); margin-bottom: 8px;
+  }
+  #start-screen .desc {
+    font-size: 10px; letter-spacing: 2px;
+    color: rgba(255,255,255,0.3); margin-bottom: 40px;
+  }
+  #start-btn {
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.3);
+    color: rgba(255,255,255,0.9);
+    padding: 14px 36px; font-size: 12px; letter-spacing: 4px;
+    font-family: 'Courier New', monospace;
+    cursor: pointer; transition: all 0.3s;
+    border-radius: 2px;
+  }
+  #start-btn:hover {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.6);
+  }
+
+  /* Loading overlay */
+  #loading {
+    position: fixed; inset: 0;
+    display: none; align-items: center; justify-content: center;
+    background: #000; z-index: 99;
+  }
+  #loading .spinner {
+    font-size: 12px; letter-spacing: 3px;
+    color: rgba(255,255,255,0.5);
+  }
+  @keyframes pulse { 0%,100% { opacity: 0.3; } 50% { opacity: 1; } }
+  #loading .spinner { animation: pulse 1.5s ease-in-out infinite; }
+
+  /* Emotion score bars */
+  #emotion-bars {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    display: none; gap: 12px; z-index: 10;
+    pointer-events: none;
+  }
+  .bar-group {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+  }
+  .bar-label {
+    font-size: 8px; letter-spacing: 1px;
+    color: rgba(255,255,255,0.4);
+  }
+  .bar-track {
+    width: 40px; height: 4px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 2px; overflow: hidden;
+  }
+  .bar-fill {
+    height: 100%; border-radius: 2px;
+    transition: width 0.1s;
+  }
+</style>
+</head>
+<body>
+
+<div id="start-screen">
+  <h2>FACE MIRROR</h2>
+  <div class="desc">MEDIAPIPE FACE LANDMARKER × 468 POINTS</div>
+  <button id="start-btn">START CAMERA</button>
+</div>
+
+<div id="loading">
+  <div class="spinner">LOADING MODEL...</div>
+</div>
+
+<div id="ui" style="display:none;">
+  <div class="title-block">
+    <h1>FACE MIRROR</h1>
+    <div class="sub">MEDIAPIPE × 468 LANDMARKS</div>
+    <div id="fps"></div>
+  </div>
+  <div class="controls" id="modes"></div>
+</div>
+
+<div id="emotion-bars"></div>
+
+<video id="video" autoplay playsinline style="display:none;"></video>
+<canvas id="canvas"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+<script>
+// ---- Globals ----
+let faceLandmarker = null;
+let video, canvas, ctx;
+let currentMode = 'wireframe';
+let animId = null;
+let lastTime = 0;
+let frameCount = 0;
+let fpsValue = 0;
+let particles = [];
+let emotionEffects = [];
+let flashAlpha = 0;
+let canvasW, canvasH;
+
+const MODES = ['WIREFRAME', 'MESH', 'PARTICLES', 'EMOTION'];
+
+// ---- MediaPipe Setup ----
+async function initMediaPipe() {
+  const { FaceLandmarker, FilesetResolver } = vision;
+  const filesetResolver = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+  );
+  faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+      delegate: "GPU",
+    },
+    outputFaceBlendshapes: true,
+    runningMode: "VIDEO",
+    numFaces: 1,
+  });
+}
+
+// ---- Camera Setup ----
+async function startCamera() {
+  video = document.getElementById('video');
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } }
+  });
+  video.srcObject = stream;
+  await new Promise(resolve => {
+    video.onloadeddata = resolve;
+  });
+}
+
+// ---- Canvas Setup ----
+function setupCanvas() {
+  canvas = document.getElementById('canvas');
+  ctx = canvas.getContext('2d');
+  resize();
+  window.addEventListener('resize', resize);
+}
+
+function resize() {
+  canvasW = window.innerWidth;
+  canvasH = window.innerHeight;
+  canvas.width = canvasW;
+  canvas.height = canvasH;
+}
+
+// ---- Coordinate Transform (mirror) ----
+function lmToCanvas(lm) {
+  return {
+    x: (1 - lm.x) * canvasW,
+    y: lm.y * canvasH,
+    z: lm.z
+  };
+}
+
+// ---- UI Setup ----
+function setupUI() {
+  const modesEl = document.getElementById('modes');
+  MODES.forEach(mode => {
+    const btn = document.createElement('button');
+    btn.className = 'mode-btn' + (mode.toLowerCase() === currentMode ? ' active' : '');
+    btn.textContent = mode;
+    btn.addEventListener('click', () => {
+      currentMode = mode.toLowerCase();
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      particles = [];
+      emotionEffects = [];
+      flashAlpha = 0;
+      document.getElementById('emotion-bars').style.display =
+        currentMode === 'emotion' ? 'flex' : 'none';
+    });
+    modesEl.appendChild(btn);
+  });
+
+  // Emotion bars
+  const barsEl = document.getElementById('emotion-bars');
+  const emotions = [
+    { key: 'smile', label: 'SMILE', color: '#ff6b6b' },
+    { key: 'jawOpen', label: 'MOUTH', color: '#4ecdc4' },
+    { key: 'blink', label: 'BLINK', color: '#45b7d1' },
+    { key: 'surprise', label: 'SURPRISE', color: '#f9ca24' },
+  ];
+  emotions.forEach(e => {
+    const group = document.createElement('div');
+    group.className = 'bar-group';
+    group.innerHTML = `
+      <div class="bar-label">${e.label}</div>
+      <div class="bar-track">
+        <div class="bar-fill" id="bar-${e.key}" style="width:0%;background:${e.color};"></div>
+      </div>
+    `;
+    barsEl.appendChild(group);
+  });
+
+  // Keyboard shortcuts
+  window.addEventListener('keydown', e => {
+    const num = parseInt(e.key);
+    if (num >= 1 && num <= 4) {
+      const mode = MODES[num - 1].toLowerCase();
+      currentMode = mode;
+      document.querySelectorAll('.mode-btn').forEach((b, i) => {
+        b.classList.toggle('active', i === num - 1);
+      });
+      particles = [];
+      emotionEffects = [];
+      flashAlpha = 0;
+      document.getElementById('emotion-bars').style.display =
+        currentMode === 'emotion' ? 'flex' : 'none';
+    }
+  });
+}
+
+// ---- Drawing Helpers ----
+function drawConnectors(landmarks, connections, color, lineWidth) {
+  ctx.strokeStyle = color;
+  ctx.lineWidth = lineWidth;
+  ctx.shadowBlur = 12;
+  ctx.shadowColor = color;
+  ctx.beginPath();
+  for (const [start, end] of connections) {
+    if (start >= landmarks.length || end >= landmarks.length) continue;
+    const a = lmToCanvas(landmarks[start]);
+    const b = lmToCanvas(landmarks[end]);
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+}
+
+function getConnectionIndices(connectorSet) {
+  const indices = [];
+  if (!connectorSet) return indices;
+  for (const conn of connectorSet) {
+    indices.push([conn.start, conn.end]);
+  }
+  return indices;
+}
+
+// ---- WIREFRAME Mode ----
+function drawWireframe(landmarks) {
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  const { FaceLandmarker } = vision;
+
+  // Face oval - white
+  const ovalConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_FACE_OVAL);
+  drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.6)', 1.5);
+
+  // Eyes - cyan
+  const leftEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYE);
+  const rightEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE);
+  drawConnectors(landmarks, leftEyeConn, '#00ffff', 1.5);
+  drawConnectors(landmarks, rightEyeConn, '#00ffff', 1.5);
+
+  // Eyebrows - cyan dim
+  const leftBrowConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW);
+  const rightBrowConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW);
+  drawConnectors(landmarks, leftBrowConn, 'rgba(0,255,255,0.5)', 1);
+  drawConnectors(landmarks, rightBrowConn, 'rgba(0,255,255,0.5)', 1);
+
+  // Lips - magenta
+  const lipsConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LIPS);
+  drawConnectors(landmarks, lipsConn, '#ff00ff', 1.5);
+
+  // Draw landmark points
+  for (const lm of landmarks) {
+    const p = lmToCanvas(lm);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---- MESH Mode ----
+function drawMesh(landmarks) {
+  // Draw camera feed
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, -canvasW, 0, canvasW, canvasH);
+  ctx.restore();
+
+  // Semi-transparent overlay
+  ctx.fillStyle = 'rgba(0,0,0,0.4)';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  const { FaceLandmarker } = vision;
+  const tessConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_TESSELATION);
+
+  for (const [start, end] of tessConn) {
+    if (start >= landmarks.length || end >= landmarks.length) continue;
+    const a = lmToCanvas(landmarks[start]);
+    const b = lmToCanvas(landmarks[end]);
+    const depth = (landmarks[start].z + landmarks[end].z) / 2;
+    const hue = 180 + depth * 800;
+    ctx.strokeStyle = `hsla(${hue}, 80%, 60%, 0.3)`;
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+  }
+
+  // Highlight points
+  for (const lm of landmarks) {
+    const p = lmToCanvas(lm);
+    const depth = lm.z;
+    const hue = 180 + depth * 800;
+    ctx.fillStyle = `hsla(${hue}, 80%, 60%, 0.5)`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---- PARTICLES Mode ----
+function drawParticles(landmarks) {
+  // Trail effect
+  ctx.fillStyle = 'rgba(0,0,0,0.08)';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  // Spawn new particles from landmarks
+  for (let i = 0; i < landmarks.length; i += 4) {
+    const lm = landmarks[i];
+    const p = lmToCanvas(lm);
+    particles.push({
+      x: p.x,
+      y: p.y,
+      vx: (Math.random() - 0.5) * 2,
+      vy: (Math.random() - 0.5) * 2,
+      life: 1.0,
+      hue: (i / landmarks.length) * 360,
+      size: Math.random() * 2 + 0.5,
+    });
+  }
+
+  // Cap particles
+  if (particles.length > 8000) {
+    particles = particles.slice(-6000);
+  }
+
+  // Update and draw
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vx += (Math.random() - 0.5) * 0.3;
+    p.vy += (Math.random() - 0.5) * 0.3;
+    p.life -= 0.008;
+
+    if (p.life <= 0) {
+      particles.splice(i, 1);
+      continue;
+    }
+
+    ctx.fillStyle = `hsla(${p.hue}, 80%, 60%, ${p.life * 0.6})`;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// ---- EMOTION Mode ----
+function getBlendshapeScore(blendshapes, name) {
+  if (!blendshapes || !blendshapes.categories) return 0;
+  const cat = blendshapes.categories.find(c => c.categoryName === name);
+  return cat ? cat.score : 0;
+}
+
+function drawEmotion(landmarks, blendshapes) {
+  // Draw wireframe base
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  ctx.fillRect(0, 0, canvasW, canvasH);
+
+  const { FaceLandmarker } = vision;
+  const ovalConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_FACE_OVAL);
+  drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.3)', 1);
+  const leftEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYE);
+  const rightEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE);
+  drawConnectors(landmarks, leftEyeConn, 'rgba(0,255,255,0.4)', 1);
+  drawConnectors(landmarks, rightEyeConn, 'rgba(0,255,255,0.4)', 1);
+  const lipsConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LIPS);
+  drawConnectors(landmarks, lipsConn, 'rgba(255,0,255,0.4)', 1);
+
+  // Get scores
+  const smileL = getBlendshapeScore(blendshapes, 'mouthSmileLeft');
+  const smileR = getBlendshapeScore(blendshapes, 'mouthSmileRight');
+  const smile = (smileL + smileR) / 2;
+  const jawOpen = getBlendshapeScore(blendshapes, 'jawOpen');
+  const blinkL = getBlendshapeScore(blendshapes, 'eyeBlinkLeft');
+  const blinkR = getBlendshapeScore(blendshapes, 'eyeBlinkRight');
+  const blink = (blinkL + blinkR) / 2;
+  const browUp = getBlendshapeScore(blendshapes, 'browInnerUp');
+
+  // Update bars
+  document.getElementById('bar-smile').style.width = (smile * 100) + '%';
+  document.getElementById('bar-jawOpen').style.width = (jawOpen * 100) + '%';
+  document.getElementById('bar-blink').style.width = (blink * 100) + '%';
+  document.getElementById('bar-surprise').style.width = (browUp * 100) + '%';
+
+  // Face center
+  const nose = lmToCanvas(landmarks[1]);
+
+  // Smile → warm particles around face
+  if (smile > 0.3) {
+    const intensity = Math.floor(smile * 15);
+    for (let i = 0; i < intensity; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = 80 + Math.random() * 60;
+      emotionEffects.push({
+        type: 'smile',
+        x: nose.x + Math.cos(angle) * dist,
+        y: nose.y + Math.sin(angle) * dist,
+        vx: Math.cos(angle) * 1.5,
+        vy: Math.sin(angle) * 1.5 - 1,
+        life: 1.0,
+        size: Math.random() * 3 + 1,
+      });
+    }
+  }
+
+  // Jaw open → blue ripple from mouth
+  if (jawOpen > 0.2) {
+    const mouth = lmToCanvas(landmarks[13]);
+    emotionEffects.push({
+      type: 'ripple',
+      x: mouth.x,
+      y: mouth.y,
+      radius: 5,
+      maxRadius: 40 + jawOpen * 80,
+      life: 1.0,
+    });
+  }
+
+  // Blink → screen flash
+  if (blink > 0.6) {
+    flashAlpha = Math.max(flashAlpha, 0.15);
+  }
+
+  // Surprise → light rings around eyes
+  if (browUp > 0.3) {
+    const leftEye = lmToCanvas(landmarks[159]);
+    const rightEye = lmToCanvas(landmarks[386]);
+    emotionEffects.push({
+      type: 'ring',
+      x: leftEye.x, y: leftEye.y,
+      radius: 5, maxRadius: 25 + browUp * 30,
+      life: 1.0,
+    });
+    emotionEffects.push({
+      type: 'ring',
+      x: rightEye.x, y: rightEye.y,
+      radius: 5, maxRadius: 25 + browUp * 30,
+      life: 1.0,
+    });
+  }
+
+  // Draw effects
+  for (let i = emotionEffects.length - 1; i >= 0; i--) {
+    const ef = emotionEffects[i];
+
+    if (ef.type === 'smile') {
+      ef.x += ef.vx;
+      ef.y += ef.vy;
+      ef.life -= 0.02;
+      if (ef.life <= 0) { emotionEffects.splice(i, 1); continue; }
+      const hue = 20 + Math.random() * 30;
+      ctx.fillStyle = `hsla(${hue}, 90%, 60%, ${ef.life * 0.8})`;
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = `hsla(${hue}, 90%, 60%, 0.5)`;
+      ctx.beginPath();
+      ctx.arc(ef.x, ef.y, ef.size * ef.life, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    if (ef.type === 'ripple') {
+      ef.radius += 2;
+      ef.life -= 0.03;
+      if (ef.life <= 0 || ef.radius > ef.maxRadius) {
+        emotionEffects.splice(i, 1); continue;
+      }
+      ctx.strokeStyle = `rgba(70, 180, 220, ${ef.life * 0.6})`;
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = 'rgba(70, 180, 220, 0.4)';
+      ctx.beginPath();
+      ctx.arc(ef.x, ef.y, ef.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+
+    if (ef.type === 'ring') {
+      ef.radius += 1.5;
+      ef.life -= 0.03;
+      if (ef.life <= 0 || ef.radius > ef.maxRadius) {
+        emotionEffects.splice(i, 1); continue;
+      }
+      ctx.strokeStyle = `rgba(249, 202, 36, ${ef.life * 0.7})`;
+      ctx.lineWidth = 1.5;
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = 'rgba(249, 202, 36, 0.5)';
+      ctx.beginPath();
+      ctx.arc(ef.x, ef.y, ef.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+    }
+  }
+
+  // Cap effects
+  if (emotionEffects.length > 500) {
+    emotionEffects = emotionEffects.slice(-300);
+  }
+
+  // Flash effect
+  if (flashAlpha > 0) {
+    ctx.fillStyle = `rgba(255,255,255,${flashAlpha})`;
+    ctx.fillRect(0, 0, canvasW, canvasH);
+    flashAlpha *= 0.85;
+    if (flashAlpha < 0.005) flashAlpha = 0;
+  }
+}
+
+// ---- Render Loop ----
+function render() {
+  animId = requestAnimationFrame(render);
+
+  if (!faceLandmarker || video.readyState < 2) return;
+
+  // FPS
+  frameCount++;
+  const now = performance.now();
+  if (now - lastTime >= 1000) {
+    fpsValue = frameCount;
+    frameCount = 0;
+    lastTime = now;
+    document.getElementById('fps').textContent = fpsValue + ' FPS';
+  }
+
+  // Detect
+  const results = faceLandmarker.detectForVideo(video, now);
+  const landmarks = results.faceLandmarks && results.faceLandmarks[0];
+  const blendshapes = results.faceBlendshapes && results.faceBlendshapes[0];
+
+  if (!landmarks) {
+    // No face: dim overlay
+    if (currentMode === 'wireframe' || currentMode === 'particles' || currentMode === 'emotion') {
+      ctx.fillStyle = 'rgba(0,0,0,0.05)';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+    } else {
+      ctx.save();
+      ctx.scale(-1, 1);
+      ctx.drawImage(video, -canvasW, 0, canvasW, canvasH);
+      ctx.restore();
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(0, 0, canvasW, canvasH);
+    }
+    return;
+  }
+
+  switch (currentMode) {
+    case 'wireframe': drawWireframe(landmarks); break;
+    case 'mesh': drawMesh(landmarks); break;
+    case 'particles': drawParticles(landmarks); break;
+    case 'emotion': drawEmotion(landmarks, blendshapes); break;
+  }
+}
+
+// ---- Boot ----
+document.getElementById('start-btn').addEventListener('click', async () => {
+  document.getElementById('start-screen').style.display = 'none';
+  document.getElementById('loading').style.display = 'flex';
+
+  try {
+    setupCanvas();
+    await Promise.all([initMediaPipe(), startCamera()]);
+    setupUI();
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('ui').style.display = 'flex';
+    lastTime = performance.now();
+    render();
+  } catch (err) {
+    document.getElementById('loading').innerHTML =
+      `<div style="text-align:center;color:rgba(255,255,255,0.6);font-size:12px;letter-spacing:2px;">
+        <div style="margin-bottom:16px;">ERROR</div>
+        <div style="color:rgba(255,255,255,0.3);font-size:10px;">${err.message}</div>
+      </div>`;
+  }
+});
+</script>
+</body>
+</html>
