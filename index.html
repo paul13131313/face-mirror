@@ -163,14 +163,25 @@
 
 <script>
 // ---- vision 読み込み確認 ----
-if (typeof vision === 'undefined' || !vision.FaceLandmarker) {
-  document.getElementById('start-btn').textContent = 'ERROR: LIBRARY LOAD FAILED';
-  throw new Error('vision_bundle.js failed to load');
+const btnEl = document.getElementById('start-btn');
+try {
+  if (typeof vision === 'undefined') {
+    btnEl.textContent = 'ERROR: vision undefined (script blocked?)';
+    throw new Error('vision is undefined');
+  }
+  const keys = Object.keys(vision);
+  if (!vision.FaceLandmarker) {
+    btnEl.textContent = 'ERROR: No FaceLandmarker (keys: ' + keys.join(',') + ')';
+    throw new Error('FaceLandmarker not found in vision. Keys: ' + keys.join(','));
+  }
+} catch (e) {
+  console.error(e);
+  throw e;
 }
 
 // vision が読み込まれたらボタンを有効化
-document.getElementById('start-btn').disabled = false;
-document.getElementById('start-btn').textContent = 'START CAMERA';
+btnEl.disabled = false;
+btnEl.textContent = 'START CAMERA';
 
 // ---- Globals ----
 const { FaceLandmarker, FilesetResolver } = vision;
