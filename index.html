@@ -172,8 +172,21 @@ let canvasW, canvasH;
 
 const MODES = ['WIREFRAME', 'MESH', 'PARTICLES', 'EMOTION'];
 
+// ---- Wait for vision global ----
+function waitForVision(timeout = 15000) {
+  return new Promise((resolve, reject) => {
+    if (typeof vision !== 'undefined') { resolve(); return; }
+    const start = Date.now();
+    const check = setInterval(() => {
+      if (typeof vision !== 'undefined') { clearInterval(check); resolve(); }
+      else if (Date.now() - start > timeout) { clearInterval(check); reject(new Error('MediaPipe vision_bundle.js の読み込みに失敗しました')); }
+    }, 100);
+  });
+}
+
 // ---- MediaPipe Setup ----
 async function initMediaPipe() {
+  await waitForVision();
   const { FaceLandmarker, FilesetResolver } = vision;
   const filesetResolver = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
