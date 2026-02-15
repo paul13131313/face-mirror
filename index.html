@@ -155,7 +155,6 @@
 <video id="video" autoplay playsinline style="display:none;"></video>
 <canvas id="canvas"></canvas>
 
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
 <script>
 // ---- Globals ----
 let faceLandmarker = null;
@@ -172,24 +171,34 @@ let canvasW, canvasH;
 
 const MODES = ['WIREFRAME', 'MESH', 'PARTICLES', 'EMOTION'];
 
-// ---- Wait for vision global ----
-function waitForVision(timeout = 15000) {
+// ---- Load vision_bundle.js dynamically ----
+function loadVisionBundle() {
   return new Promise((resolve, reject) => {
-    if (typeof vision !== 'undefined') { resolve(); return; }
-    const start = Date.now();
-    const check = setInterval(() => {
-      if (typeof vision !== 'undefined') { clearInterval(check); resolve(); }
-      else if (Date.now() - start > timeout) { clearInterval(check); reject(new Error('MediaPipe vision_bundle.js の読み込みに失敗しました')); }
-    }, 100);
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.js';
+    script.crossOrigin = 'anonymous';
+    script.onload = () => {
+      // vision_bundle.js sets global `vision` object
+      const check = setInterval(() => {
+        if (typeof vision !== 'undefined' && vision.FaceLandmarker) {
+          clearInterval(check);
+          resolve();
+        }
+      }, 50);
+      // safety timeout
+      setTimeout(() => { clearInterval(check); resolve(); }, 5000);
+    };
+    script.onerror = () => reject(new Error('vision_bundle.js の読み込みに失敗しました'));
+    document.head.appendChild(script);
   });
 }
 
 // ---- MediaPipe Setup ----
 async function initMediaPipe() {
-  await waitForVision();
+  await loadVisionBundle();
   const { FaceLandmarker, FilesetResolver } = vision;
   const filesetResolver = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
   );
   faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
     baseOptions: {
@@ -200,6 +209,18 @@ async function initMediaPipe() {
     runningMode: "VIDEO",
     numFaces: 1,
   });
+
+  // Cache landmark connection sets
+  const FL = vision.FaceLandmarker;
+  window._FL = {
+    FACE_OVAL: FL.FACE_LANDMARKS_FACE_OVAL,
+    LEFT_EYE: FL.FACE_LANDMARKS_LEFT_EYE,
+    RIGHT_EYE: FL.FACE_LANDMARKS_RIGHT_EYE,
+    LEFT_EYEBROW: FL.FACE_LANDMARKS_LEFT_EYEBROW,
+    RIGHT_EYEBROW: FL.FACE_LANDMARKS_RIGHT_EYEBROW,
+    LIPS: FL.FACE_LANDMARKS_LIPS,
+    TESSELATION: FL.FACE_LANDMARKS_TESSELATION,
+  };
 }
 
 // ---- Camera Setup ----
@@ -328,26 +349,26 @@ function drawWireframe(landmarks) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const { FaceLandmarker } = vision;
+  const FL = window._FL;
 
   // Face oval - white
-  const ovalConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_FACE_OVAL);
+  const ovalConn = getConnectionIndices(FL.FACE_OVAL);
   drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.6)', 1.5);
 
   // Eyes - cyan
-  const leftEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYE);
-  const rightEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE);
+  const leftEyeConn = getConnectionIndices(FL.LEFT_EYE);
+  const rightEyeConn = getConnectionIndices(FL.RIGHT_EYE);
   drawConnectors(landmarks, leftEyeConn, '#00ffff', 1.5);
   drawConnectors(landmarks, rightEyeConn, '#00ffff', 1.5);
 
   // Eyebrows - cyan dim
-  const leftBrowConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW);
-  const rightBrowConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW);
+  const leftBrowConn = getConnectionIndices(FL.LEFT_EYEBROW);
+  const rightBrowConn = getConnectionIndices(FL.RIGHT_EYEBROW);
   drawConnectors(landmarks, leftBrowConn, 'rgba(0,255,255,0.5)', 1);
   drawConnectors(landmarks, rightBrowConn, 'rgba(0,255,255,0.5)', 1);
 
   // Lips - magenta
-  const lipsConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LIPS);
+  const lipsConn = getConnectionIndices(FL.LIPS);
   drawConnectors(landmarks, lipsConn, '#ff00ff', 1.5);
 
   // Draw landmark points
@@ -372,8 +393,8 @@ function drawMesh(landmarks) {
   ctx.fillStyle = 'rgba(0,0,0,0.4)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const { FaceLandmarker } = vision;
-  const tessConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_TESSELATION);
+  const FL = window._FL;
+  const tessConn = getConnectionIndices(FL.TESSELATION);
 
   for (const [start, end] of tessConn) {
     if (start >= landmarks.length || end >= landmarks.length) continue;
@@ -460,14 +481,14 @@ function drawEmotion(landmarks, blendshapes) {
   ctx.fillStyle = 'rgba(0,0,0,0.3)';
   ctx.fillRect(0, 0, canvasW, canvasH);
 
-  const { FaceLandmarker } = vision;
-  const ovalConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_FACE_OVAL);
+  const FL = window._FL;
+  const ovalConn = getConnectionIndices(FL.FACE_OVAL);
   drawConnectors(landmarks, ovalConn, 'rgba(255,255,255,0.3)', 1);
-  const leftEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LEFT_EYE);
-  const rightEyeConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE);
+  const leftEyeConn = getConnectionIndices(FL.LEFT_EYE);
+  const rightEyeConn = getConnectionIndices(FL.RIGHT_EYE);
   drawConnectors(landmarks, leftEyeConn, 'rgba(0,255,255,0.4)', 1);
   drawConnectors(landmarks, rightEyeConn, 'rgba(0,255,255,0.4)', 1);
-  const lipsConn = getConnectionIndices(FaceLandmarker.FACE_LANDMARKS_LIPS);
+  const lipsConn = getConnectionIndices(FL.LIPS);
   drawConnectors(landmarks, lipsConn, 'rgba(255,0,255,0.4)', 1);
 
   // Get scores
