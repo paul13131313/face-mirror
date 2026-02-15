@@ -158,33 +158,14 @@
 <video id="video" autoplay playsinline style="display:none;"></video>
 <canvas id="canvas"></canvas>
 
-<!-- MediaPipe vision_bundle.js を同期読み込み -->
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js" crossorigin="anonymous"></script>
+<script type="module">
+import vision from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.js';
 
-<script>
-// ---- vision 読み込み確認 ----
-const btnEl = document.getElementById('start-btn');
-try {
-  if (typeof vision === 'undefined') {
-    btnEl.textContent = 'ERROR: vision undefined (script blocked?)';
-    throw new Error('vision is undefined');
-  }
-  const keys = Object.keys(vision);
-  if (!vision.FaceLandmarker) {
-    btnEl.textContent = 'ERROR: No FaceLandmarker (keys: ' + keys.join(',') + ')';
-    throw new Error('FaceLandmarker not found in vision. Keys: ' + keys.join(','));
-  }
-} catch (e) {
-  console.error(e);
-  throw e;
-}
+const { FaceLandmarker, FilesetResolver } = vision;
 
 // vision が読み込まれたらボタンを有効化
-btnEl.disabled = false;
-btnEl.textContent = 'START CAMERA';
-
-// ---- Globals ----
-const { FaceLandmarker, FilesetResolver } = vision;
+document.getElementById('start-btn').disabled = false;
+document.getElementById('start-btn').textContent = 'START CAMERA';
 let faceLandmarker = null;
 let video, canvas, ctx;
 let currentMode = 'wireframe';
