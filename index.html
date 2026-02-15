@@ -175,7 +175,7 @@ const MODES = ['WIREFRAME', 'MESH', 'PARTICLES', 'EMOTION'];
 function loadVisionBundle() {
   return new Promise((resolve, reject) => {
     const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/vision_bundle.js';
+    script.src = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/vision_bundle.js';
     script.crossOrigin = 'anonymous';
     script.onload = () => {
       // vision_bundle.js sets global `vision` object
@@ -198,7 +198,7 @@ async function initMediaPipe() {
   await loadVisionBundle();
   const { FaceLandmarker, FilesetResolver } = vision;
   const filesetResolver = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.18/wasm"
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0/wasm"
   );
   faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
     baseOptions: {
